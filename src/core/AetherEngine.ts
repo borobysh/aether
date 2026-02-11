@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
-import {AetherLayer} from './AetherLayer';
+import {AetherLayer} from '../layers/AetherLayer';
 import {IAetherCamera} from "./IAetherCamera";
+import {SpatialHashGrid} from "./SpatialHashGrid";
 
 export interface AetherOptions {
     container: HTMLElement;
@@ -8,12 +9,14 @@ export interface AetherOptions {
 
     app?: PIXI.Application;
     appOptions?: Partial<PIXI.IApplicationOptions>;
+    cellSize?: number;
 }
 
 export class AetherEngine {
     public app: PIXI.Application;
     private layers: Map<string, AetherLayer> = new Map();
     public camera: IAetherCamera;
+    public grid: SpatialHashGrid;
 
     constructor(options: AetherOptions) {
         if (options.app) {
@@ -31,6 +34,8 @@ export class AetherEngine {
             options.container.appendChild(this.app.view as HTMLCanvasElement);
         }
 
+        this.grid = new SpatialHashGrid(options.cellSize || 512);
+
         this.camera = options.camera;
         this.app.stage.addChild(this.camera.container);
     }
@@ -46,6 +51,24 @@ export class AetherEngine {
     }
 
     public destroy() {
+        this.app.ticker.remove(this.update, this);
+        this.layers.forEach(layer => layer.destroy());
+        this.layers.clear();
+        this.grid.clear();
         this.app.destroy(true, {children: true, texture: true});
+    }
+
+    public update() {
+        const view = this.camera.viewBounds;
+        const visibleIds = this.grid.queryRange(
+            view.x,
+            view.y,
+            view.width,
+            view.height
+        );
+
+        this.layers.forEach(layer => {
+            layer.update(visibleIds);
+        });
     }
 }
