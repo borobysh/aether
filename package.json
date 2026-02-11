@@ -1,0 +1,34 @@
+{
+  "name": "@borobysh/aether",
+  "version": "1.0.0",
+  "description": "High-performance graph visualization engine for PixiJS. Focused on 60 FPS with 30k+ elements",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && vue-tsc --emitDeclarationOnly",
+    "dev": "tsup src/index.ts --format cjs,esm --watch --dts"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "keywords": [],
+  "author": "borobysh",
+  "license": "MIT",
+  "peerDependencies": {
+    "pixi.js": "^7.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "pixi.js": "^7.4.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "vite": "^7.3.1"
+  }
+}
