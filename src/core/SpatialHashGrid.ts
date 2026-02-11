@@ -1,3 +1,5 @@
+import { DEFAULT_CELL_SIZE, DDA_SAFETY_LIMIT } from './constants';
+
 /**
  * Spatial hash grid for efficient object lookup and culling.
  * Divides the world into fixed-size cells for O(1) spatial queries.
@@ -6,7 +8,7 @@ export class SpatialHashGrid {
     private cellSize: number;
     private cells: Map<string, Set<string>> = new Map();
 
-    constructor(cellSize: number = 256) {
+    constructor(cellSize: number = DEFAULT_CELL_SIZE) {
         this.cellSize = cellSize;
     }
 
@@ -108,7 +110,7 @@ export class SpatialHashGrid {
             
             cells.add(`${cx},${cy}`);
             
-            if (cells.size > 10000) {
+            if (cells.size > DDA_SAFETY_LIMIT) {
                 console.warn('SpatialHashGrid: exceeded safety limit');
                 break;
             }

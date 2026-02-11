@@ -6,6 +6,8 @@ export interface IAetherCamera {
     position: { x: number; y: number };
     viewBounds: PIXI.Rectangle;
 
+    pan(deltaX: number, deltaY: number): void;
+    zoomAt(screenX: number, screenY: number, delta: number): void;
     toWorld(screenPoint: PIXI.IPointData): PIXI.IPointData;
     toScreen(worldPoint: PIXI.IPointData): PIXI.IPointData;
     fitBounds(bounds: PIXI.Rectangle): void;
