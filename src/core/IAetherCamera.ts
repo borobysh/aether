@@ -11,4 +11,5 @@ export interface IAetherCamera {
     toWorld(screenPoint: PIXI.IPointData): PIXI.IPointData;
     toScreen(worldPoint: PIXI.IPointData): PIXI.IPointData;
     fitBounds(bounds: PIXI.Rectangle): void;
+    resize(width: number, height: number): void;
 }
