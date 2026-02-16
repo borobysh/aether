@@ -6,6 +6,13 @@ import {PickingSystem, PickResult} from './PickingSystem';
 import {EventEmitter} from './EventEmitter';
 import {DEFAULT_CELL_SIZE, DEFAULT_PICK_RADIUS, MOUSE_BUTTON, HOVER_THROTTLE_MS} from './constants';
 import {AetherCamera} from "./AetherCamera";
+import {
+    AetherInputEvent,
+    AetherPointerEvent,
+    AetherCanvasPointerEvent,
+    AetherPointerMoveEvent,
+    AetherPointerUpEvent
+} from './types';
 
 export interface AetherOptions {
     container: HTMLElement;
@@ -24,6 +31,8 @@ export class AetherEngine extends EventEmitter {
 
     private layers = new Map<string, AetherLayer>();
     private canvas: HTMLCanvasElement;
+    private container: HTMLElement;
+    private resizeObserver: ResizeObserver | null = null;
 
     private isPanning = false;
     private lastPointer = {x: 0, y: 0};
@@ -32,6 +41,8 @@ export class AetherEngine extends EventEmitter {
 
     constructor(options: AetherOptions) {
         super();
+
+        this.container = options.container;
 
         if (options.app) {
             this.app = options.app;
@@ -51,10 +62,19 @@ export class AetherEngine extends EventEmitter {
         this.canvas = this.app.view as HTMLCanvasElement;
         this.grid = new SpatialHashGrid(options.cellSize ?? DEFAULT_CELL_SIZE);
         this.picking = new PickingSystem(this.grid, options.pickRadius ?? DEFAULT_PICK_RADIUS);
+
+        const initialWidth = options.container.clientWidth || 800;
+        const initialHeight = options.container.clientHeight || 600;
+        
+        if (options.camera instanceof AetherCamera) {
+            options.camera.resize(initialWidth, initialHeight);
+        }
+        
         this.camera = options.camera;
         this.app.stage.addChild(this.camera.container);
 
         this.setupInput();
+        this.setupResizeObserver();
     }
 
     public addLayer(id: string, layer: AetherLayer) {
@@ -74,6 +94,20 @@ export class AetherEngine extends EventEmitter {
         this.canvas.addEventListener('wheel', this.onWheel);
     }
 
+    private setupResizeObserver(): void {
+        this.resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const { width, height } = entry.contentRect;
+                if (width > 0 && height > 0) {
+                    this.camera.resize(width, height);
+                    this.emit('camera:resize', { width, height });
+                }
+            }
+        });
+
+        this.resizeObserver.observe(this.container);
+    }
+
     private onPointerDown = (e: PointerEvent): void => {
         const rect = this.canvas.getBoundingClientRect();
         const screenX = e.clientX - rect.left;
@@ -82,6 +116,18 @@ export class AetherEngine extends EventEmitter {
 
         this.lastPointer = {x: e.clientX, y: e.clientY};
 
+        const baseEvent: AetherInputEvent = {
+            worldX: world.x,
+            worldY: world.y,
+            screenX,
+            screenY,
+            button: e.button,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey
+        };
+
         if (e.button === MOUSE_BUTTON.MIDDLE) {
             this.isPanning = true;
             this.canvas.style.cursor = 'grabbing';
@@ -89,21 +135,26 @@ export class AetherEngine extends EventEmitter {
             return;
         }
 
+        // Проверяем picking для всех кнопок (включая right-click)
         const picked = this.picking.pick(world.x, world.y);
 
-        if (picked && e.button === MOUSE_BUTTON.LEFT) {
-            this.emit('object:pointerdown', {
-                result: picked,
-                worldX: world.x,
-                worldY: world.y,
-                screenX,
-                screenY,
-                button: e.button
-            });
-        } else if (e.button === MOUSE_BUTTON.LEFT) {
-            this.isPanning = true;
-            this.canvas.style.cursor = 'grabbing';
-            this.emit('canvas:pointerdown', {worldX: world.x, worldY: world.y});
+        if (picked) {
+            // Эмитим событие с результатом picking для любой кнопки
+            const pointerEvent: AetherPointerEvent = {
+                ...baseEvent,
+                result: picked
+            };
+            this.emit('object:pointerdown', pointerEvent);
+        } else {
+            // Клик по пустому месту
+            const canvasEvent: AetherCanvasPointerEvent = baseEvent;
+            this.emit('canvas:pointerdown', canvasEvent);
+            
+            // Только левая кнопка на пустом месте начинает pan
+            if (e.button === MOUSE_BUTTON.LEFT) {
+                this.isPanning = true;
+                this.canvas.style.cursor = 'grabbing';
+            }
         }
     };
 
@@ -116,14 +167,24 @@ export class AetherEngine extends EventEmitter {
         const deltaScreenX = e.clientX - this.lastPointer.x;
         const deltaScreenY = e.clientY - this.lastPointer.y;
 
-        this.emit('pointermove', {
+        const picked = this.isPanning ? null : this.picking.pick(world.x, world.y);
+
+        const moveEvent: AetherPointerMoveEvent = {
             worldX: world.x,
             worldY: world.y,
             screenX,
             screenY,
+            button: e.button,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
             deltaScreenX,
-            deltaScreenY
-        });
+            deltaScreenY,
+            result: picked
+        };
+
+        this.emit('pointermove', moveEvent);
 
         if (this.isPanning) {
             this.camera.pan(-deltaScreenX, -deltaScreenY);
@@ -135,8 +196,6 @@ export class AetherEngine extends EventEmitter {
                 return;
             }
             this.lastHoverCheck = now;
-
-            const picked = this.picking.pick(world.x, world.y);
 
             if (picked?.id !== this.hoveredObject?.id) {
                 if (this.hoveredObject) {
@@ -162,14 +221,20 @@ export class AetherEngine extends EventEmitter {
         const world = this.camera.toWorld({x: screenX, y: screenY});
         const picked = this.picking.pick(world.x, world.y);
 
-        this.emit('pointerup', {
-            result: picked,
+        const upEvent: AetherPointerUpEvent = {
             worldX: world.x,
             worldY: world.y,
             screenX,
             screenY,
-            button: e.button
-        });
+            button: e.button,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+            result: picked
+        };
+
+        this.emit('pointerup', upEvent);
 
         if (this.isPanning) {
             this.isPanning = false;
@@ -204,6 +269,11 @@ export class AetherEngine extends EventEmitter {
     }
 
     public destroy(): void {
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
+
         this.canvas.removeEventListener('pointerdown', this.onPointerDown);
         this.canvas.removeEventListener('pointermove', this.onPointerMove);
         this.canvas.removeEventListener('pointerup', this.onPointerUp);
