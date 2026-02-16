@@ -186,6 +186,7 @@ export class SpatialHashGrid {
         };
     }
 
+    /** Returns object IDs in rectangle (x, y, width, height). */
     public queryRange(x: number, y: number, width: number, height: number): Set<string> {
         const found = new Set<string>();
         const startX = Math.floor(x / this.cellSize);
@@ -205,6 +206,12 @@ export class SpatialHashGrid {
         return found;
     }
 
+    /** Alias for queryRange. */
+    public queryRect(x: number, y: number, width: number, height: number): Set<string> {
+        return this.queryRange(x, y, width, height);
+    }
+
+    /** Returns object IDs in the cell containing (x, y). */
     public queryPoint(x: number, y: number): Set<string> {
         const key = this.getCellKey(x, y);
         return this.cells.get(key) || new Set();
