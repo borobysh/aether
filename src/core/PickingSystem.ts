@@ -5,6 +5,8 @@ export interface PickResult {
     type: 'node' | 'edge';
     id: string;
     distance: number;
+    /** Layer pick priority. Higher = rendered on top. */
+    priority: number;
 }
 
 interface EdgeData {
@@ -12,12 +14,14 @@ interface EdgeData {
     y1: number;
     x2: number;
     y2: number;
+    priority: number;
 }
 
 interface NodeData {
     x: number;
     y: number;
     radius: number;
+    priority: number;
 }
 
 export class PickingSystem {
@@ -25,56 +29,86 @@ export class PickingSystem {
     private edges = new Map<string, EdgeData>();
     private nodes = new Map<string, NodeData>();
     private pickRadius: number;
+    private cachedMaxNodeRadius: number = 0;
 
     constructor(grid: SpatialHashGrid, pickRadius: number = DEFAULT_PICK_RADIUS) {
         this.grid = grid;
         this.pickRadius = pickRadius;
     }
 
+    /**
+     * Pick the topmost object at (worldX, worldY).
+     *
+     * Algorithm:
+     * 1. Collect all candidates within search radius.
+     * 2. For each candidate compute hit distance (point-in-circle for nodes, point-to-line for edges).
+     * 3. Select winner: highest priority first, then smallest distance.
+     */
     public pick(worldX: number, worldY: number): PickResult | null {
+        // Search radius: pickRadius for edges, but need to find nodes whose center
+        // may be further away (up to their own radius).
+        const searchRadius = Math.max(this.pickRadius, this.cachedMaxNodeRadius);
+
         const candidates = this.grid.queryRange(
-            worldX - this.pickRadius,
-            worldY - this.pickRadius,
-            this.pickRadius * 2,
-            this.pickRadius * 2
+            worldX - searchRadius,
+            worldY - searchRadius,
+            searchRadius * 2,
+            searchRadius * 2
         );
 
         if (candidates.size === 0) return null;
 
-        let closest: PickResult | null = null;
-        let closestDist = this.pickRadius;
+        let best: PickResult | null = null;
 
         for (const id of candidates) {
-            if (id.startsWith('node-')) {
-                const node = this.nodes.get(id);
-                if (!node) continue;
-
+            const node = this.nodes.get(id);
+            if (node) {
                 const dx = worldX - node.x;
                 const dy = worldY - node.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                if (dist < node.radius && dist < closestDist) {
-                    closestDist = dist;
-                    closest = { type: 'node', id, distance: dist };
-                }
-            } else if (id.startsWith('edge-')) {
-                const edge = this.edges.get(id);
-                if (!edge) continue;
+                if (dist > node.radius) continue; // Outside node circle
 
+                if (this.isBetter(best, node.priority, dist)) {
+                    best = { type: 'node', id, distance: dist, priority: node.priority };
+                }
+                continue;
+            }
+
+            const edge = this.edges.get(id);
+            if (edge) {
                 const dist = this.pointToLineDistance(
                     worldX, worldY,
                     edge.x1, edge.y1,
                     edge.x2, edge.y2
                 );
 
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closest = { type: 'edge', id, distance: dist };
+                if (dist > this.pickRadius) continue; // Too far from edge line
+
+                if (this.isBetter(best, edge.priority, dist)) {
+                    best = { type: 'edge', id, distance: dist, priority: edge.priority };
                 }
             }
         }
 
-        return closest;
+        return best;
+    }
+
+    /**
+     * Returns true if (priority, dist) is better than current best.
+     * Higher priority wins. At same priority, shorter distance wins.
+     */
+    private isBetter(current: PickResult | null, priority: number, dist: number): boolean {
+        if (!current) return true;
+        if (priority > current.priority) return true;
+        if (priority === current.priority && dist < current.distance) return true;
+        return false;
+    }
+
+    private updateMaxNodeRadius(): void {
+        let max = 0;
+        this.nodes.forEach(n => { if (n.radius > max) max = n.radius; });
+        this.cachedMaxNodeRadius = max;
     }
 
     private pointToLineDistance(
@@ -103,12 +137,13 @@ export class PickingSystem {
         return Math.sqrt(distX * distX + distY * distY);
     }
 
-    public registerEdge(id: string, x1: number, y1: number, x2: number, y2: number): void {
-        this.edges.set(id, { x1, y1, x2, y2 });
+    public registerEdge(id: string, x1: number, y1: number, x2: number, y2: number, priority: number = 0): void {
+        this.edges.set(id, { x1, y1, x2, y2, priority });
     }
 
-    public registerNode(id: string, x: number, y: number, radius: number): void {
-        this.nodes.set(id, { x, y, radius });
+    public registerNode(id: string, x: number, y: number, radius: number, priority: number = 0): void {
+        this.nodes.set(id, { x, y, radius, priority });
+        if (radius > this.cachedMaxNodeRadius) this.cachedMaxNodeRadius = radius;
     }
 
     public updateNode(id: string, x: number, y: number): void {
@@ -130,13 +165,15 @@ export class PickingSystem {
     }
 
     public unregister(id: string): void {
+        const hadNode = this.nodes.delete(id);
         this.edges.delete(id);
-        this.nodes.delete(id);
+        if (hadNode) this.updateMaxNodeRadius();
     }
 
     public clear(): void {
         this.edges.clear();
         this.nodes.clear();
+        this.cachedMaxNodeRadius = 0;
     }
 }
 

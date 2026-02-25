@@ -11,17 +11,15 @@ export interface SpriteNodeData {
     anchor?: number | { x: number; y: number };
 }
 
-/**
- * High-perf layer for graph nodes. Uses ParticleContainer, supports culling via visibleIds.
- */
 export class SpriteLayer extends AetherLayer {
     protected particleContainer: PIXI.ParticleContainer;
-    protected sprites = new Map<string, PIXI.Sprite>();
     protected nodeData = new Map<string, SpriteNodeData>();
     protected defaultTexture: PIXI.Texture | null = null;
 
     constructor(maxCount: number = 15000, defaultTexture?: PIXI.Texture) {
         super();
+        this.cullingEnabled = true;
+
         this.particleContainer = new PIXI.ParticleContainer(maxCount, {
             position: true,
             scale: true,
@@ -30,68 +28,50 @@ export class SpriteLayer extends AetherLayer {
             tint: true
         });
         this.container.addChild(this.particleContainer);
-        
+
         if (defaultTexture) {
             this.defaultTexture = defaultTexture;
         }
     }
 
-    /** Replaces all nodes. Clears existing sprites first. */
     public setData(nodes: SpriteNodeData[]): void {
         this.clear();
-
-        // Создаем новые спрайты
         for (const nodeData of nodes) {
             this.createSprite(nodeData);
         }
     }
 
-    /**
-     * Создает спрайт для узла
-     */
-    private createSprite(nodeData: SpriteNodeData): void {
-        const texture = nodeData.texture || this.defaultTexture;
-        
+    private createSprite(data: SpriteNodeData): void {
+        const texture = data.texture || this.defaultTexture;
+
         if (!texture) {
-            console.warn(`SpriteLayer: No texture provided for node ${nodeData.id}`);
+            console.warn(`SpriteLayer: no texture for ${data.id}`);
             return;
         }
 
         const sprite = new PIXI.Sprite(texture);
-        sprite.position.set(nodeData.x, nodeData.y);
+        sprite.position.set(data.x, data.y);
 
-        if (typeof nodeData.anchor === 'number') {
-            sprite.anchor.set(nodeData.anchor);
-        } else if (nodeData.anchor) {
-            sprite.anchor.set(nodeData.anchor.x, nodeData.anchor.y);
+        if (typeof data.anchor === 'number') {
+            sprite.anchor.set(data.anchor);
+        } else if (data.anchor) {
+            sprite.anchor.set(data.anchor.x, data.anchor.y);
         } else {
-            sprite.anchor.set(0.5, 0.5); // По умолчанию центрируем
+            sprite.anchor.set(0.5, 0.5);
         }
 
-        if (nodeData.scale !== undefined) {
-            sprite.scale.set(nodeData.scale);
-        }
+        if (data.scale !== undefined) sprite.scale.set(data.scale);
+        if (data.tint !== undefined) sprite.tint = data.tint;
 
-        if (nodeData.tint !== undefined) {
-            sprite.tint = nodeData.tint;
-        }
-
-        this.nodeData.set(nodeData.id, nodeData);
-        this.sprites.set(nodeData.id, sprite);
+        this.nodeData.set(data.id, data);
+        this.registerCullable(data.id, sprite);
         this.particleContainer.addChild(sprite);
     }
 
-    /** Culling: set visibility per visibleIds. Called by engine.update(). */
-    public update(visibleIds: Set<string>): void {
-        this.sprites.forEach((sprite, id) => {
-            sprite.visible = visibleIds.has(id);
-        });
-    }
-
     public updateNodePosition(id: string, x: number, y: number): void {
-        const sprite = this.sprites.get(id);
+        const sprite = this.cullableObjects.get(id) as PIXI.Sprite | undefined;
         const data = this.nodeData.get(id);
-        
+
         if (sprite && data) {
             sprite.position.set(x, y);
             data.x = x;
@@ -99,15 +79,11 @@ export class SpriteLayer extends AetherLayer {
         }
     }
 
-    /** Partial update without recreating sprite. */
     public updateNode(id: string, updates: Partial<Omit<SpriteNodeData, 'id'>>): void {
-        const sprite = this.sprites.get(id);
+        const sprite = this.cullableObjects.get(id) as PIXI.Sprite | undefined;
         const data = this.nodeData.get(id);
-        
-        if (!sprite || !data) {
-            return;
-        }
 
+        if (!sprite || !data) return;
 
         if (updates.x !== undefined || updates.y !== undefined) {
             const x = updates.x ?? data.x;
@@ -143,22 +119,21 @@ export class SpriteLayer extends AetherLayer {
     }
 
     public removeNode(id: string): void {
-        const sprite = this.sprites.get(id);
-        
+        const sprite = this.cullableObjects.get(id) as PIXI.Sprite | undefined;
+
         if (sprite) {
             this.particleContainer.removeChild(sprite);
             sprite.destroy();
-            this.sprites.delete(id);
+            this.unregisterCullable(id);
             this.nodeData.delete(id);
         }
     }
 
     public clear(): void {
-        this.sprites.forEach(sprite => {
-            sprite.destroy();
+        this.cullableObjects.forEach(obj => {
+            (obj as PIXI.Sprite).destroy();
         });
-        
-        this.sprites.clear();
+        this.clearCullables();
         this.nodeData.clear();
         this.particleContainer.removeChildren();
     }
@@ -170,7 +145,7 @@ export class SpriteLayer extends AetherLayer {
     }
 
     public getSprite(id: string): PIXI.Sprite | undefined {
-        return this.sprites.get(id);
+        return this.cullableObjects.get(id) as PIXI.Sprite | undefined;
     }
 
     public getNodeData(id: string): SpriteNodeData | undefined {
@@ -178,6 +153,6 @@ export class SpriteLayer extends AetherLayer {
     }
 
     public get count(): number {
-        return this.sprites.size;
+        return this.cullableObjects.size;
     }
 }

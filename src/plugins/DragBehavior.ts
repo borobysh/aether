@@ -6,6 +6,8 @@ export interface DragBehaviorConfig {
     enabled?: boolean;
     mode?: 'classic' | 'ghost' | 'none';
     dragThreshold?: number;
+    /** Return false to block drag start (e.g. when Shift held for marquee). */
+    canStartDrag?: (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean;
     onDragStart?: (result: PickResult) => boolean | void;
     onDrag?: (result: PickResult, worldX: number, worldY: number, deltaX: number, deltaY: number) => void;
     onDragEnd?: (result: PickResult) => void;
@@ -27,6 +29,7 @@ export class DragBehavior {
             enabled: config.enabled ?? true,
             mode: config.mode ?? 'classic',
             dragThreshold: config.dragThreshold ?? 3,
+            canStartDrag: config.canStartDrag ?? (() => true),
             onDragStart: config.onDragStart ?? (() => true),
             onDrag: config.onDrag ?? this.defaultDragHandler.bind(this),
             onDragEnd: config.onDragEnd ?? this.defaultDragEndHandler.bind(this)
@@ -52,6 +55,10 @@ export class DragBehavior {
             if (!this.dragTarget) return;
 
             if (!this.isDragging) {
+                if (!this.config.canStartDrag({ shiftKey: event.shiftKey ?? false, ctrlKey: event.ctrlKey ?? false, metaKey: event.metaKey ?? false })) {
+                    this.dragTarget = null;
+                    return;
+                }
                 const dx = event.worldX - this.pointerDownWorld.x;
                 const dy = event.worldY - this.pointerDownWorld.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);

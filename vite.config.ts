@@ -4,8 +4,9 @@ import path from 'path';
 export default defineConfig({
     build: {
         lib: {
-            entry: path.resolve(__dirname, 'src/index.ts'), // Точка входа, где ты экспортируешь Engine, Layer и т.д.
+            entry: path.resolve(__dirname, 'src/index.ts'),
             name: 'Aether',
+            fileName: 'index',
         },
         rollupOptions: {
             // Важно: не вшиваем Pixi в билд либы

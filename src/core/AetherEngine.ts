@@ -14,6 +14,9 @@ import {
     AetherPointerUpEvent
 } from './types';
 
+/** Called before pan starts and on pointermove. Return false to block pan. */
+export type CanPanPredicate = (e: PointerEvent) => boolean;
+
 export interface AetherOptions {
     container: HTMLElement;
     camera: IAetherCamera;
@@ -21,6 +24,7 @@ export interface AetherOptions {
     appOptions?: Partial<PIXI.IApplicationOptions>;
     cellSize?: number;
     pickRadius?: number;
+    canPan?: CanPanPredicate;
 }
 
 export class AetherEngine extends EventEmitter {
@@ -38,6 +42,7 @@ export class AetherEngine extends EventEmitter {
     private lastPointer = {x: 0, y: 0};
     private hoveredObject: PickResult | null = null;
     private lastHoverCheck = 0;
+    private canPan: CanPanPredicate | undefined;
 
     constructor(options: AetherOptions) {
         super();
@@ -71,13 +76,17 @@ export class AetherEngine extends EventEmitter {
         }
         
         this.camera = options.camera;
+        this.canPan = options.canPan;
         this.app.stage.addChild(this.camera.container);
 
         this.setupInput();
         this.setupResizeObserver();
     }
 
+    private layerOrder = 0;
+
     public addLayer(id: string, layer: AetherLayer) {
+        layer.pickPriority = this.layerOrder++;
         this.layers.set(id, layer);
         layer.attach(this);
         this.camera.container.addChild(layer.container);
@@ -135,25 +144,24 @@ export class AetherEngine extends EventEmitter {
             return;
         }
 
-        // Проверяем picking для всех кнопок (включая right-click)
         const picked = this.picking.pick(world.x, world.y);
 
         if (picked) {
-            // Эмитим событие с результатом picking для любой кнопки
             const pointerEvent: AetherPointerEvent = {
                 ...baseEvent,
                 result: picked
             };
             this.emit('object:pointerdown', pointerEvent);
         } else {
-            // Клик по пустому месту
             const canvasEvent: AetherCanvasPointerEvent = baseEvent;
             this.emit('canvas:pointerdown', canvasEvent);
-            
-            // Только левая кнопка на пустом месте начинает pan
+
             if (e.button === MOUSE_BUTTON.LEFT) {
-                this.isPanning = true;
-                this.canvas.style.cursor = 'grabbing';
+                const allowPan = this.canPan === undefined || this.canPan(e);
+                if (allowPan) {
+                    this.isPanning = true;
+                    this.canvas.style.cursor = 'grabbing';
+                }
             }
         }
     };
@@ -187,8 +195,11 @@ export class AetherEngine extends EventEmitter {
         this.emit('pointermove', moveEvent);
 
         if (this.isPanning) {
-            this.camera.pan(-deltaScreenX, -deltaScreenY);
-            this.emit('camera:pan', {deltaX: deltaScreenX, deltaY: deltaScreenY});
+            const allowPan = this.canPan === undefined || this.canPan(e);
+            if (allowPan) {
+                this.camera.pan(-deltaScreenX, -deltaScreenY);
+                this.emit('camera:pan', {deltaX: deltaScreenX, deltaY: deltaScreenY});
+            }
         } else {
             const now = performance.now();
             if (now - this.lastHoverCheck < HOVER_THROTTLE_MS) {
@@ -256,6 +267,7 @@ export class AetherEngine extends EventEmitter {
 
     public update(): void {
         const view = this.camera.viewBounds;
+        const zoom = this.camera.zoom;
         const visibleIds = this.grid.queryRange(
             view.x,
             view.y,
@@ -264,7 +276,7 @@ export class AetherEngine extends EventEmitter {
         );
 
         this.layers.forEach(layer => {
-            layer.update(visibleIds);
+            layer._tick(zoom, visibleIds);
         });
     }
 
